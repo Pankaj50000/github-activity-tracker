@@ -1,4 +1,4 @@
-
+import React from 'react';
 import { User, GitCommit, GitPullRequest, AlertCircle } from 'lucide-react';
 
 interface ActivityItemProps {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Car as Card } from 'lucide-react';
 
 interface ActivityCardProps {
   title: string;

@@ -1,4 +1,4 @@
-
+import React from 'react';
 import { User, GitCommit, GitPullRequest, MessageSquare } from 'lucide-react';
 import type { ActivityItem } from '../types';
 

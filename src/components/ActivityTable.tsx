@@ -1,4 +1,4 @@
-
+import React from 'react';
 import { GitCommit, GitPullRequest, AlertCircle, MessageSquare, User, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
 import type { ActivityItem } from '../types';

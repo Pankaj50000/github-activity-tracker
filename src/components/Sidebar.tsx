@@ -1,4 +1,4 @@
-
+import React from 'react';
 import { GitBranch, ChevronDown } from 'lucide-react';
 
 interface SidebarProps {
