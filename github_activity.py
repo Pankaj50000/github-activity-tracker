@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import requests
 import time
-import argparse
 
 # Load environment variables
 load_dotenv()
@@ -17,7 +16,7 @@ if not GITHUB_TOKEN:
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("VITE_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")  # Changed to use service role key
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("Supabase credentials are missing. Check .env file for VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY")
 
@@ -33,21 +32,15 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
-def parse_date(date_str: str) -> datetime:
-    return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-
 def format_date(date_str: str) -> str:
     """Safely format a date string to ISO format."""
     try:
         if not date_str:
             return datetime.now(timezone.utc).isoformat()
-        # Remove 'Z' and add timezone info if needed
         clean_date = date_str.replace('Z', '+00:00')
-        # Parse and format the date
         parsed_date = datetime.fromisoformat(clean_date)
         return parsed_date.isoformat()
     except (ValueError, TypeError):
-        # Return current time if date is invalid
         return datetime.now(timezone.utc).isoformat()
 
 def load_repositories():
@@ -58,7 +51,20 @@ def load_repositories():
     with open(config_file, "r") as file:
         return [line.strip().split("=")[0] for line in file]
 
-def fetch_paginated_data(url, since_date=None, until_date=None):
+def get_latest_date(table_name: str, repo_id: int, date_field: str) -> datetime:
+    """Get the latest date from a specific table for a repository."""
+    result = supabase.table(table_name)\
+        .select(date_field)\
+        .eq("repository_id", repo_id)\
+        .order(date_field, desc=True)\
+        .limit(1)\
+        .execute()
+    
+    if result.data and len(result.data) > 0:
+        return datetime.fromisoformat(result.data[0][date_field])
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+def fetch_paginated_data(url, since_date=None):
     items = []
     page = 1
     
@@ -66,8 +72,6 @@ def fetch_paginated_data(url, since_date=None, until_date=None):
         params = {"page": page, "per_page": 100}
         if since_date:
             params["since"] = since_date.isoformat()
-        if until_date:
-            params["until"] = until_date.isoformat()
             
         response = requests.get(url, headers=HEADERS, params=params)
         
@@ -87,13 +91,6 @@ def fetch_paginated_data(url, since_date=None, until_date=None):
         if not new_items:
             break
             
-        # Filter items by date range
-        if until_date:
-            new_items = [
-                item for item in new_items 
-                if datetime.fromisoformat(format_date(item.get('created_at', ''))) <= until_date
-            ]
-            
         items.extend(new_items)
         
         if len(new_items) < 100:
@@ -105,49 +102,31 @@ def fetch_paginated_data(url, since_date=None, until_date=None):
 
 def get_or_create_repository(repo_name):
     """Get existing repository or create a new one."""
-    # Try to get existing repository
     result = supabase.table("repositories").select("*").eq("name", repo_name).execute()
     
     if result.data and len(result.data) > 0:
         return result.data[0]["id"]
     
-    # Create new repository if it doesn't exist
     result = supabase.table("repositories").insert({"name": repo_name}).execute()
     return result.data[0]["id"]
 
-def clear_existing_data(repo_id, since_date=None, until_date=None):
-    """Clear existing activity data for the given repository and date range."""
-    tables = ["commits", "pull_requests", "issues", "reviews"]
-    
-    for table in tables:
-        query = supabase.table(table).delete().eq("repository_id", repo_id)
-        
-        if since_date:
-            date_field = "committed_at" if table == "commits" else "created_at"
-            query = query.gte(date_field, since_date.isoformat())
-        
-        if until_date:
-            date_field = "committed_at" if table == "commits" else "created_at"
-            query = query.lte(date_field, until_date.isoformat())
-            
-        query.execute()
-
-def store_repository_data(repo_name, since_date=None, until_date=None):
+def store_repository_data(repo_name):
     print(f"Processing {repo_name}...")
     base_url = f"https://api.github.com/repos/{repo_name}"
     
     try:
-        # Get or create repository
         repo_id = get_or_create_repository(repo_name)
         print(f"Successfully found/created repository: {repo_name}")
         
-        # Clear existing data for the date range
-        print("Clearing existing data...")
-        clear_existing_data(repo_id, since_date, until_date)
+        # Get latest dates from each table
+        latest_commit_date = get_latest_date("commits", repo_id, "committed_at")
+        latest_pr_date = get_latest_date("pull_requests", repo_id, "created_at")
+        latest_issue_date = get_latest_date("issues", repo_id, "created_at")
+        latest_review_date = get_latest_date("reviews", repo_id, "created_at")
         
-        # Fetch and store commits
-        print("Fetching commits...")
-        commits = fetch_paginated_data(f"{base_url}/commits", since_date, until_date)
+        # Fetch and store new commits
+        print("Fetching new commits...")
+        commits = fetch_paginated_data(f"{base_url}/commits", latest_commit_date)
         commit_data = [
             {
                 "repository_id": repo_id,
@@ -159,11 +138,11 @@ def store_repository_data(repo_name, since_date=None, until_date=None):
         ]
         if commit_data:
             supabase.table("commits").insert(commit_data).execute()
-            print(f"Stored {len(commit_data)} commits")
+            print(f"Stored {len(commit_data)} new commits")
 
-        # Fetch and store PRs
-        print("Fetching pull requests...")
-        prs = fetch_paginated_data(f"{base_url}/pulls", since_date, until_date)
+        # Fetch and store new PRs
+        print("Fetching new pull requests...")
+        prs = fetch_paginated_data(f"{base_url}/pulls", latest_pr_date)
         pr_data = [
             {
                 "repository_id": repo_id,
@@ -175,11 +154,11 @@ def store_repository_data(repo_name, since_date=None, until_date=None):
         ]
         if pr_data:
             supabase.table("pull_requests").insert(pr_data).execute()
-            print(f"Stored {len(pr_data)} pull requests")
+            print(f"Stored {len(pr_data)} new pull requests")
 
-        # Fetch and store issues
-        print("Fetching issues...")
-        issues = fetch_paginated_data(f"{base_url}/issues", since_date, until_date)
+        # Fetch and store new issues
+        print("Fetching new issues...")
+        issues = fetch_paginated_data(f"{base_url}/issues", latest_issue_date)
         issue_data = [
             {
                 "repository_id": repo_id,
@@ -191,13 +170,13 @@ def store_repository_data(repo_name, since_date=None, until_date=None):
         ]
         if issue_data:
             supabase.table("issues").insert(issue_data).execute()
-            print(f"Stored {len(issue_data)} issues")
+            print(f"Stored {len(issue_data)} new issues")
 
-        # Fetch and store reviews
-        print("Fetching reviews...")
+        # Fetch and store new reviews
+        print("Fetching new reviews...")
         reviews = []
-        for pr in prs[:10]:
-            pr_reviews = fetch_paginated_data(f"{base_url}/pulls/{pr['number']}/reviews", since_date, until_date)
+        for pr in prs[:10]:  # Limiting to latest 10 PRs for efficiency
+            pr_reviews = fetch_paginated_data(f"{base_url}/pulls/{pr['number']}/reviews", latest_review_date)
             reviews.extend([
                 {
                     "repository_id": repo_id,
@@ -209,7 +188,7 @@ def store_repository_data(repo_name, since_date=None, until_date=None):
             ])
         if reviews:
             supabase.table("reviews").insert(reviews).execute()
-            print(f"Stored {len(reviews)} reviews")
+            print(f"Stored {len(reviews)} new reviews")
 
         print(f"✅ Successfully processed {repo_name}")
         
@@ -217,23 +196,14 @@ def store_repository_data(repo_name, since_date=None, until_date=None):
         print(f"❌ Error processing {repo_name}: {str(e)}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Fetch GitHub activity within a date range')
-    parser.add_argument('--since', help='Start date (YYYY-MM-DD)', type=str)
-    parser.add_argument('--until', help='End date (YYYY-MM-DD)', type=str)
-    
-    args = parser.parse_args()
-    
-    since_date = parse_date(args.since) if args.since else None
-    until_date = parse_date(args.until) if args.until else None
-    
     try:
         repos = load_repositories()
         for repo in repos:
             try:
-                store_repository_data(repo, since_date, until_date)
+                store_repository_data(repo)
             except Exception as e:
                 print(f"❌ Error processing {repo}: {str(e)}")
-                continue  # Continue with next repository even if one fails
+                continue
     except Exception as e:
         print(f"❌ Error: {str(e)}")
 

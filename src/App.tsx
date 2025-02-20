@@ -11,9 +11,16 @@ function App() {
   const [selectedRepo, setSelectedRepo] = useState<string>('all');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
-  const [dateRange, setDateRange] = useState<string>('custom');
+  const [dateRange, setDateRange] = useState<string>('all');
+  const [shouldFetchData, setShouldFetchData] = useState<boolean>(true);
   
-  const { activities, loading, error } = useGitHubActivity(selectedRepo, dateRange, startDate, endDate);
+  const { activities, loading, error } = useGitHubActivity(
+    selectedRepo,
+    dateRange,
+    startDate,
+    endDate,
+    shouldFetchData
+  );
 
   if (loading) {
     return (
@@ -36,6 +43,16 @@ function App() {
     if (value !== 'custom') {
       setStartDate('');
       setEndDate('');
+      setShouldFetchData(true);
+    } else {
+      // Don't fetch data immediately when switching to custom range
+      setShouldFetchData(false);
+    }
+  };
+
+  const handleApplyCustomDates = () => {
+    if (startDate && endDate) {
+      setShouldFetchData(true);
     }
   };
 
@@ -44,7 +61,10 @@ function App() {
       <Sidebar
         repositories={[...new Set(activities.map(a => a.repository))]}
         selectedRepo={selectedRepo}
-        onSelectRepo={setSelectedRepo}
+        onSelectRepo={(repo) => {
+          setSelectedRepo(repo);
+          setShouldFetchData(true);
+        }}
       />
       
       <div className="pl-64">
@@ -72,16 +92,33 @@ function App() {
                     <input
                       type="date"
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        setShouldFetchData(false);
+                      }}
                       className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                     <span className="text-gray-500">to</span>
                     <input
                       type="date"
                       value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
+                      onChange={(e) => {
+                        setEndDate(e.target.value);
+                        setShouldFetchData(false);
+                      }}
                       className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
+                    <button
+                      onClick={handleApplyCustomDates}
+                      disabled={!startDate || !endDate}
+                      className={`px-4 py-2 rounded-lg ${
+                        !startDate || !endDate
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-blue-500 text-white hover:bg-blue-600'
+                      }`}
+                    >
+                      Apply
+                    </button>
                   </div>
                 )}
               </div>
