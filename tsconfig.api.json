@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+      "outDir": "./api/dist",
+      "rootDir": "./api",
+      "module": "CommonJS",
+      "target": "ES6",
+      "strict": true,
+      "esModuleInterop": true,
+      "resolveJsonModule": true
+    },
+    "include": ["api/**/*"]
+  }
+  

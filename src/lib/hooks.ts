@@ -92,6 +92,7 @@ export function useGitHubActivity(
           setLoading(false);
           return;
         }
+        console.log('Fetched Repositories:', repos);
 
         // Filter repositories
         const filteredRepos =
@@ -102,6 +103,7 @@ export function useGitHubActivity(
           (acc, r) => ({ ...acc, [r.id]: r.name }),
           {} as Record<string, string>
         );
+        console.log('Filtered Repo IDs:', repoIds);
 
         // Fetch all activities using method chaining
         const [commitsRes, prsRes, issuesRes, reviewsRes] = await Promise.all([
@@ -190,7 +192,9 @@ export function useGitHubActivity(
               .returns<Tables['reviews']['Row'][]>();
           })(),
         ]);
-
+        console.log('Fetched activities from Supabase:', activities);
+        console.log('mosip/gist activities:', activities.filter(a => a.repository === 'mosip/gist'));
+        
         if (signal.aborted) return;
 
         // Combine all activities

@@ -2,23 +2,31 @@
   "name": "github-activity-tracker",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -p tsconfig.api.json && vite build",
+    "start": "node api/dist/index.js",
+    "api:dev": "ts-node api/index.ts",
+    "api:build": "tsc -p tsconfig.api.json",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.48.1",
+    "@types/express": "^5.0.0",
     "chart.js": "^4.4.1",
+    "cors": "^2.8.5",
     "date-fns": "^3.3.1",
+    "express": "^4.21.2",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-chartjs-2": "^5.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/node": "^22.13.4",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
     "@typescript-eslint/eslint-plugin": "^6.21.0",

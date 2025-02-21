@@ -7,7 +7,10 @@ interface SidebarProps {
   onSelectRepo: (repo: string) => void;
 }
 
+
 export function Sidebar({ repositories, selectedRepo, onSelectRepo }: SidebarProps) {
+  console.log('Selected Repo:', selectedRepo);
+
   return (
     <div className="w-64 bg-white h-screen fixed left-0 top-0 border-r border-gray-200 flex flex-col">
       <div className="p-4 border-b border-gray-200">
@@ -34,6 +37,7 @@ export function Sidebar({ repositories, selectedRepo, onSelectRepo }: SidebarPro
               onClick={() => onSelectRepo(repo)}
               className={`w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center justify-between ${
                 selectedRepo === repo
+                
                   ? 'bg-blue-50 text-blue-600'
                   : 'hover:bg-gray-50'
               }`}
@@ -42,8 +46,11 @@ export function Sidebar({ repositories, selectedRepo, onSelectRepo }: SidebarPro
               <ChevronDown className="w-4 h-4 opacity-50" />
             </button>
           ))}
+
+
         </div>
       </div>
     </div>
+    
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { GitCommit, GitPullRequest, AlertCircle } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { StatsCard } from './components/StatsCard';
@@ -6,6 +6,8 @@ import { ActivityChart } from './components/ActivityChart';
 import { ActivityTable } from './components/ActivityTable';
 import { UserActivityStats } from './components/UserActivityStats';
 import { useGitHubActivity } from './lib/hooks';
+import { supabase } from './lib/supabase';
+import type { Database } from './lib/database.types';
 
 function App() {
   const [selectedRepo, setSelectedRepo] = useState<string>('all');
@@ -13,6 +15,9 @@ function App() {
   const [endDate, setEndDate] = useState<string>('');
   const [dateRange, setDateRange] = useState<string>('all');
   const [shouldFetchData, setShouldFetchData] = useState<boolean>(true);
+  const [newRepoInput, setNewRepoInput] = useState('');
+  const [addRepoError, setAddRepoError] = useState('');
+  const [repositories, setRepositories] = useState<string[]>([]);
   
   const { activities, loading, error } = useGitHubActivity(
     selectedRepo,
@@ -21,6 +26,27 @@ function App() {
     endDate,
     shouldFetchData
   );
+
+  useEffect(() => {
+    async function fetchRepositories() {
+      try {
+        const { data, error } = await supabase
+          .from('repositories')
+          .select('name')
+          .returns<Database['public']['Tables']['repositories']['Row'][]>();
+
+        if (error) {
+          console.error("Error fetching repositories:", error);
+        } else {
+          setRepositories(data ? data.map(repo => repo.name) : []);
+        }
+      } catch (err) {
+        console.error("Unexpected error fetching repositories:", err);
+      }
+    }
+
+    fetchRepositories();
+  }, [shouldFetchData]);
 
   if (loading) {
     return (
@@ -45,7 +71,6 @@ function App() {
       setEndDate('');
       setShouldFetchData(true);
     } else {
-      // Don't fetch data immediately when switching to custom range
       setShouldFetchData(false);
     }
   };
@@ -56,10 +81,50 @@ function App() {
     }
   };
 
+  const handleAddRepo = async () => {
+    setAddRepoError('');
+    try {
+      const res = await fetch('/api/addRepo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoName: newRepoInput }),
+      });
+
+      if (!res.ok) {
+        let errorData;
+        if (res.status === 404) {
+          errorData = { error: `Repository ${newRepoInput} not found on GitHub` };
+        } else {
+          try {
+            errorData = await res.json();
+          } catch (e) {
+            errorData = { error: `Failed to parse error response: ${res.statusText}` };
+          }
+        }
+
+        if (errorData) {
+          throw new Error(errorData.error || 'Failed to add repository');
+        }
+      }
+
+      let responseData;
+      try {
+        responseData = await res.json();
+      } catch (e) {
+        responseData = { message: 'Repository added successfully', output: await res.text() };
+      }
+
+      setShouldFetchData(true);
+      setNewRepoInput('');
+    } catch (error: any) {
+      setAddRepoError(error.message);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <Sidebar
-        repositories={[...new Set(activities.map(a => a.repository))]}
+        repositories={repositories}
         selectedRepo={selectedRepo}
         onSelectRepo={(repo) => {
           setSelectedRepo(repo);
@@ -111,11 +176,7 @@ function App() {
                     <button
                       onClick={handleApplyCustomDates}
                       disabled={!startDate || !endDate}
-                      className={`px-4 py-2 rounded-lg ${
-                        !startDate || !endDate
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : 'bg-blue-500 text-white hover:bg-blue-600'
-                      }`}
+                      className={`px-4 py-2 rounded-lg ${!startDate || !endDate ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
                     >
                       Apply
                     </button>
@@ -125,27 +186,26 @@ function App() {
             </div>
           </div>
         </header>
+        
+        <div className="p-4">
+          <input
+            type="text"
+            placeholder="Add new repository (owner/repo)"
+            value={newRepoInput}
+            onChange={(e) => setNewRepoInput(e.target.value)}
+            className="border border-gray-300 rounded px-3 py-2 mr-2"
+          />
+          <button onClick={handleAddRepo} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+            Run
+          </button>
+          {addRepoError && <p className="text-red-500 text-sm mt-1">{addRepoError}</p>}
+        </div>
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <StatsCard
-              title="Total Commits"
-              value={activities.filter(a => a.type === 'commit').length}
-              icon={GitCommit}
-              trend={12}
-            />
-            <StatsCard
-              title="Pull Requests"
-              value={activities.filter(a => a.type === 'pr').length}
-              icon={GitPullRequest}
-              trend={-5}
-            />
-            <StatsCard
-              title="Active Issues"
-              value={activities.filter(a => a.type === 'issue').length}
-              icon={AlertCircle}
-              trend={8}
-            />
+            <StatsCard title="Total Commits" value={activities.filter(a => a.type === 'commit').length} icon={GitCommit} trend={12} />
+            <StatsCard title="Pull Requests" value={activities.filter(a => a.type === 'pr').length} icon={GitPullRequest} trend={-5} />
+            <StatsCard title="Active Issues" value={activities.filter(a => a.type === 'issue').length} icon={AlertCircle} trend={8} />
           </div>
 
           <div className="mb-8">

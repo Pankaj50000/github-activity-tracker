@@ -15,6 +15,8 @@ const icons = {
 };
 
 export function ActivityTable({ activities }: ActivityTableProps) {
+  console.log('Activities received in UI:', activities);
+
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-200">

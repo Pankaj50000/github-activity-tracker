@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import requests
 import time
+import sys
 
 # Load environment variables
 load_dotenv()
@@ -197,6 +198,8 @@ def store_repository_data(repo_name):
 
 def main():
     try:
+        # Set the standard output encoding to UTF-8
+        sys.stdout.reconfigure(encoding='utf-8')
         repos = load_repositories()
         for repo in repos:
             try:
