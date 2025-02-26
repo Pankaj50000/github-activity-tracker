@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GitBranch, ChevronDown, User, Trash2 } from 'lucide-react';
 
 interface SidebarProps {
@@ -16,7 +16,10 @@ export function Sidebar({ repositories, users, selectedRepos, selectedUsers, onS
   const [repoSearchTerm, setRepoSearchTerm] = useState('');
   const [userSearchTerm, setUserSearchTerm] = useState('');
 
-  const filteredRepositories = repositories.filter(repo =>
+  // Filter out any null or empty string values from the repositories array
+  const validRepositories = repositories.filter(repo => repo);
+
+  const filteredRepositories = validRepositories.filter(repo =>
     repo.toLowerCase().includes(repoSearchTerm.toLowerCase())
   );
 

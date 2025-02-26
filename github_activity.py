@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import requests
@@ -40,8 +40,9 @@ def format_date(date_str: str) -> str:
             return datetime.now(timezone.utc).isoformat()
         clean_date = date_str.replace('Z', '+00:00')
         parsed_date = datetime.fromisoformat(clean_date)
-        return parsed_date.isoformat()
-    except (ValueError, TypeError):
+        return parsed_date.astimezone(timezone.utc).isoformat()
+    except (ValueError, TypeError) as e:
+        print(f"❌ Date formatting error: {e}. Using current time.")
         return datetime.now(timezone.utc).isoformat()
 
 def load_repositories():
@@ -62,7 +63,11 @@ def get_latest_date(table_name: str, repo_id: int, date_field: str) -> datetime:
         .execute()
     
     if result.data and len(result.data) > 0:
-        return datetime.fromisoformat(result.data[0][date_field])
+        latest_date = datetime.fromisoformat(result.data[0][date_field])
+        if latest_date < datetime.now(timezone.utc) - timedelta(days=365):
+            print(f"⚠️  Latest date from {table_name} is too old. Using a more recent date.")
+            return datetime.now(timezone.utc) - timedelta(days=7)
+        return latest_date
     return datetime.min.replace(tzinfo=timezone.utc)
 
 def fetch_paginated_data(url, since_date=None):
@@ -71,8 +76,11 @@ def fetch_paginated_data(url, since_date=None):
     
     while True:
         params = {"page": page, "per_page": 100}
-        if since_date:
+        if since_date and since_date > datetime.min.replace(tzinfo=timezone.utc):
             params["since"] = since_date.isoformat()
+            
+        print(f"Fetching {url} page {page}...")
+        print(f"Params: {params}")
             
         response = requests.get(url, headers=HEADERS, params=params)
         
@@ -83,6 +91,10 @@ def fetch_paginated_data(url, since_date=None):
                 print(f"Rate limit reached. Waiting {wait_time:.0f} seconds...")
                 time.sleep(wait_time + 1)
                 continue
+            
+        if response.status_code == 422:
+            print(f"❌ Error 422: Validation failed for {url}. Skipping this endpoint.")
+            break
             
         if response.status_code != 200:
             print(f"Error fetching {url}: {response.status_code}")
@@ -111,6 +123,30 @@ def get_or_create_repository(repo_name):
     result = supabase.table("repositories").insert({"name": repo_name}).execute()
     return result.data[0]["id"]
 
+def check_for_duplicates(table_name, repo_id, data, match_fields):
+    """Check for duplicates using multiple fields for matching."""
+    if not data:
+        return []
+    
+    new_items = []
+    for item in data:
+        # Build query conditions
+        query = supabase.table(table_name).select("*").eq("repository_id", repo_id)
+        
+        # Add all matching conditions
+        for field in match_fields:
+            if field in item and item[field]:
+                query = query.eq(field, item[field])
+        
+        # Execute the query
+        result = query.execute()
+        
+        # If no matches found, add to new items
+        if not result.data:
+            new_items.append(item)
+    
+    return new_items
+
 def store_repository_data(repo_name):
     print(f"Processing {repo_name}...")
     base_url = f"https://api.github.com/repos/{repo_name}"
@@ -128,68 +164,121 @@ def store_repository_data(repo_name):
         # Fetch and store new commits
         print("Fetching new commits...")
         commits = fetch_paginated_data(f"{base_url}/commits", latest_commit_date)
-        commit_data = [
-            {
-                "repository_id": repo_id,
-                "message": c["commit"]["message"],
-                "author": c["commit"]["author"]["name"],
-                "committed_at": format_date(c["commit"]["author"]["date"])
-            }
-            for c in commits
-        ]
-        if commit_data:
-            supabase.table("commits").insert(commit_data).execute()
-            print(f"Stored {len(commit_data)} new commits")
+        
+        # Prepare commit data
+        commit_data = []
+        for c in commits:
+            try:
+                commit_item = {
+                    "repository_id": repo_id,
+                    "message": c["commit"]["message"],
+                    "author": c["commit"]["author"]["name"],
+                    "committed_at": format_date(c["commit"]["author"]["date"])
+                }
+                commit_data.append(commit_item)
+            except Exception as e:
+                print(f"❌ Error processing commit: {str(e)}")
+                continue
+        
+        # Check for duplicates using message and author and committed_at
+        new_commits = check_for_duplicates("commits", repo_id, commit_data, 
+                                         ["message", "author", "committed_at"])
+        
+        if new_commits:
+            supabase.table("commits").insert(new_commits).execute()
+            print(f"Stored {len(new_commits)} new commits")
+        else:
+            print("No new commits to store")
 
         # Fetch and store new PRs
         print("Fetching new pull requests...")
         prs = fetch_paginated_data(f"{base_url}/pulls", latest_pr_date)
-        pr_data = [
-            {
-                "repository_id": repo_id,
-                "title": p["title"],
-                "author": p["user"]["login"],
-                "created_at": format_date(p["created_at"])
-            }
-            for p in prs
-        ]
-        if pr_data:
-            supabase.table("pull_requests").insert(pr_data).execute()
-            print(f"Stored {len(pr_data)} new pull requests")
+        
+        # Prepare PR data
+        pr_data = []
+        for p in prs:
+            try:
+                pr_item = {
+                    "repository_id": repo_id,
+                    "title": p["title"],
+                    "author": p["user"]["login"],
+                    "created_at": format_date(p["created_at"])
+                }
+                pr_data.append(pr_item)
+            except Exception as e:
+                print(f"❌ Error processing PR: {str(e)}")
+                continue
+        
+        # Check for duplicates using title, author and created_at
+        new_prs = check_for_duplicates("pull_requests", repo_id, pr_data, 
+                                     ["title", "author", "created_at"])
+        
+        if new_prs:
+            supabase.table("pull_requests").insert(new_prs).execute()
+            print(f"Stored {len(new_prs)} new pull requests")
+        else:
+            print("No new pull requests to store")
 
         # Fetch and store new issues
         print("Fetching new issues...")
-        issues = fetch_paginated_data(f"{base_url}/issues", latest_issue_date)
-        issue_data = [
-            {
-                "repository_id": repo_id,
-                "title": i["title"],
-                "author": i["user"]["login"],
-                "created_at": format_date(i["created_at"])
-            }
-            for i in issues if "pull_request" not in i
-        ]
-        if issue_data:
-            supabase.table("issues").insert(issue_data).execute()
-            print(f"Stored {len(issue_data)} new issues")
+        try:
+            issues = fetch_paginated_data(f"{base_url}/issues", latest_issue_date)
+            
+            # Prepare issue data (excluding PRs)
+            issue_data = []
+            for i in issues:
+                if "pull_request" not in i:
+                    try:
+                        issue_item = {
+                            "repository_id": repo_id,
+                            "title": i["title"],
+                            "author": i["user"]["login"],
+                            "created_at": format_date(i["created_at"])
+                        }
+                        issue_data.append(issue_item)
+                    except Exception as e:
+                        print(f"❌ Error processing issue: {str(e)}")
+                        continue
+            
+            # Check for duplicates using title, author and created_at
+            new_issues = check_for_duplicates("issues", repo_id, issue_data, 
+                                           ["title", "author", "created_at"])
+            
+            if new_issues:
+                supabase.table("issues").insert(new_issues).execute()
+                print(f"Stored {len(new_issues)} new issues")
+            else:
+                print("No new issues to store")
+        except Exception as e:
+            print(f"❌ Error fetching issues: {str(e)}")
 
         # Fetch and store new reviews
         print("Fetching new reviews...")
-        reviews = []
-        for pr in prs[:10]:  # Limiting to latest 10 PRs for efficiency
-            pr_reviews = fetch_paginated_data(f"{base_url}/pulls/{pr['number']}/reviews", latest_review_date)
-            reviews.extend([
-                {
-                    "repository_id": repo_id,
-                    "comment": r["body"] if r["body"] else "No comment provided",
-                    "author": r["user"]["login"],
-                    "created_at": format_date(r["submitted_at"])
-                }
-                for r in pr_reviews
-            ])
-        if reviews:
-            supabase.table("reviews").insert(reviews).execute()
-            print(f"Stored {len(reviews)} new reviews")
+        all_reviews = []
+        for pr in prs:
+            pr_reviews = fetch_paginated_data(f"{base_url}/pulls/{pr['number']}/reviews")
+            for r in pr_reviews:
+                try:
+                    review_item = {
+                        "repository_id": repo_id,
+                        "comment": r["body"] if r["body"] else "No comment provided",
+                        "author": r["user"]["login"],
+                        "created_at": format_date(r["submitted_at"])
+                    }
+                    all_reviews.append(review_item)
+                except Exception as e:
+                    print(f"❌ Error processing review: {str(e)}")
+                    continue
+        
+        # Check for duplicates using comment, author and created_at
+        new_reviews = check_for_duplicates("reviews", repo_id, all_reviews, 
+                                        ["comment", "author", "created_at"])
+        
+        if new_reviews:
+            supabase.table("reviews").insert(new_reviews).execute()
+            print(f"Stored {len(new_reviews)} new reviews")
+        else:
+            print("No new reviews to store")
 
         print(f"✅ Successfully processed {repo_name}")
         

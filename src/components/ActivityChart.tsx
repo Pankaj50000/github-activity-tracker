@@ -24,7 +24,7 @@ interface ActivityChartProps {
   activities: ActivityItem[];
 }
 
-export function ActivityChart({ activities }: ActivityChartProps) {
+const ActivityChart: React.FC<ActivityChartProps> = ({ activities }) => {
   // Process activities to get per-user stats
   const userStats = activities.reduce((acc, activity) => {
     if (!acc[activity.author]) {
@@ -44,6 +44,8 @@ export function ActivityChart({ activities }: ActivityChartProps) {
         break;
       case 'issue':
         acc[activity.author].issues++;
+        break;
+      default:
         break;
     }
 
@@ -134,3 +136,5 @@ export function ActivityChart({ activities }: ActivityChartProps) {
     </div>
   );
 }
+
+export default ActivityChart;

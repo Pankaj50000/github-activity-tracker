@@ -1,18 +1,8 @@
-import React, { useState } from 'react';
+// src/Sidebar.jsx
+import React, { useState, useEffect } from 'react';
 import { GitBranch, ChevronDown, User, Trash2 } from 'lucide-react';
 
-interface SidebarProps {
-  repositories: string[];
-  users: string[];
-  selectedRepos: string[];
-  selectedUsers: string[];
-  onSelectRepos: (repos: string[]) => void;
-  onSelectUsers: (users: string[]) => void;
-  onSelectRepo: (repo: string) => void;
-  onDeleteUser: (user: string) => void;
-}
-
-export function Sidebar({ repositories, users, selectedRepos, selectedUsers, onSelectRepos, onSelectUsers, onSelectRepo, onDeleteUser }: SidebarProps) {
+function Sidebar({ repositories, users, selectedRepos, selectedUsers, onSelectRepos, onSelectUsers, onSelectRepo, onDeleteUser }) {
   const [repoSearchTerm, setRepoSearchTerm] = useState('');
   const [userSearchTerm, setUserSearchTerm] = useState('');
 
@@ -24,7 +14,7 @@ export function Sidebar({ repositories, users, selectedRepos, selectedUsers, onS
     user.toLowerCase().includes(userSearchTerm.toLowerCase())
   );
 
-  const handleRepoCheckboxChange = (repo: string) => {
+  const handleRepoCheckboxChange = (repo) => {
     if (selectedRepos.includes(repo)) {
       onSelectRepos(selectedRepos.filter(r => r !== repo));
     } else {
@@ -32,7 +22,7 @@ export function Sidebar({ repositories, users, selectedRepos, selectedUsers, onS
     }
   };
 
-  const handleUserCheckboxChange = (user: string) => {
+  const handleUserCheckboxChange = (user) => {
     if (selectedUsers.includes(user)) {
       onSelectUsers(selectedUsers.filter(u => u !== user));
     } else {
@@ -40,7 +30,7 @@ export function Sidebar({ repositories, users, selectedRepos, selectedUsers, onS
     }
   };
 
-  const handleDeleteUserClick = (user: string) => {
+  const handleDeleteUserClick = (user) => {
     onDeleteUser(user);
   };
 

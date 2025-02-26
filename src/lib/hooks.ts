@@ -23,7 +23,10 @@ export function useGitHubActivity(
   dateRange: string,
   startDate?: string,
   endDate?: string,
-  shouldFetchData: boolean = true
+  shouldFetchData: boolean = true,
+  searchUsername: string = '',
+  selectedRepos: string[] = [],
+  selectedUsers: string[] = []
 ): UseGitHubActivityResult {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -31,12 +34,12 @@ export function useGitHubActivity(
 
   useEffect(() => {
     if (!shouldFetchData) {
-      if (loading) setLoading(false);
+      setLoading(false);
       return;
     }
 
     const controller = new AbortController();
-    const { signal } = controller;
+    const signal = controller.signal;
 
     async function fetchData() {
       try {
@@ -95,8 +98,12 @@ export function useGitHubActivity(
         console.log('Fetched Repositories:', repos);
 
         // Filter repositories
-        const filteredRepos =
+        let filteredRepos =
           selectedRepo === 'all' ? repos : repos.filter((r) => r.name === selectedRepo);
+
+        if (selectedRepos.length > 0) {
+          filteredRepos = repos.filter(repo => selectedRepos.includes(repo.name));
+        }
 
         const repoIds = filteredRepos.map((r) => r.id);
         const repoNames = filteredRepos.reduce(
@@ -105,93 +112,98 @@ export function useGitHubActivity(
         );
         console.log('Filtered Repo IDs:', repoIds);
 
+        // Helper function to apply date filters
+        const applyDateFilters = (query:any, dateFilter: Date | null, endDateFilter: Date | null, dateField: string) => {
+          let withDateFilter = query;
+          if (dateFilter) {
+            withDateFilter = withDateFilter.gte(dateField, dateFilter.toISOString());
+          }
+          if (endDateFilter) {
+            withDateFilter = withDateFilter.lte(dateField, endDateFilter.toISOString());
+          }
+          return withDateFilter;
+        };
+
         // Fetch all activities using method chaining
         const [commitsRes, prsRes, issuesRes, reviewsRes] = await Promise.all([
-          // For commits
           (() => {
-            // Using method chaining instead of reassignment
-            const query = supabase
+            let query = supabase
               .from('commits')
               .select('*')
               .in('repository_id', repoIds);
-            
-            const withDateFilter = dateFilter 
-              ? query.gte('committed_at', dateFilter.toISOString()) 
-              : query;
-              
-            const withEndDateFilter = endDateFilter 
-              ? withDateFilter.lte('committed_at', endDateFilter.toISOString()) 
-              : withDateFilter;
-            
-            return withEndDateFilter
+
+            if (searchUsername) {
+              query = query.eq('author', searchUsername);
+            } else if (selectedUsers.length > 0) {
+              query = query.in('author', selectedUsers);
+            }
+
+            query = applyDateFilters(query, dateFilter, endDateFilter, 'committed_at');
+
+            return query
               .order('committed_at', { ascending: false })
               .abortSignal(signal)
               .returns<Tables['commits']['Row'][]>();
           })(),
-
-          // For PRs
           (() => {
-            const query = supabase
+            let query = supabase
               .from('pull_requests')
               .select('*')
               .in('repository_id', repoIds);
-            
-            const withDateFilter = dateFilter 
-              ? query.gte('created_at', dateFilter.toISOString()) 
-              : query;
-              
-            const withEndDateFilter = endDateFilter 
-              ? withDateFilter.lte('created_at', endDateFilter.toISOString()) 
-              : withDateFilter;
-            
-            return withEndDateFilter
+
+            if (searchUsername) {
+              query = query.eq('author', searchUsername);
+            } else if (selectedUsers.length > 0) {
+              query = query.in('author', selectedUsers);
+            }
+
+            query = applyDateFilters(query, dateFilter, endDateFilter, 'created_at');
+
+            return query
               .order('created_at', { ascending: false })
               .abortSignal(signal)
               .returns<Tables['pull_requests']['Row'][]>();
           })(),
-
-          // For issues
           (() => {
-            const query = supabase
+            let query = supabase
               .from('issues')
               .select('*')
               .in('repository_id', repoIds);
-            
-            const withDateFilter = dateFilter 
-              ? query.gte('created_at', dateFilter.toISOString()) 
-              : query;
-              
-            const withEndDateFilter = endDateFilter 
-              ? withDateFilter.lte('created_at', endDateFilter.toISOString()) 
-              : withDateFilter;
-            
-            return withEndDateFilter
+
+            if (searchUsername) {
+              query = query.eq('author', searchUsername);
+            } else if (selectedUsers.length > 0) {
+              query = query.in('author', selectedUsers);
+            }
+
+            query = applyDateFilters(query, dateFilter, endDateFilter, 'created_at');
+
+            return query
               .order('created_at', { ascending: false })
               .abortSignal(signal)
               .returns<Tables['issues']['Row'][]>();
           })(),
-
-          // For reviews
           (() => {
-            const query = supabase
+            let query = supabase
               .from('reviews')
               .select('*')
               .in('repository_id', repoIds);
-            
-            const withDateFilter = dateFilter 
-              ? query.gte('created_at', dateFilter.toISOString()) 
-              : query;
-              
-            const withEndDateFilter = endDateFilter 
-              ? withDateFilter.lte('created_at', endDateFilter.toISOString()) 
-              : withDateFilter;
-            
-            return withEndDateFilter
+
+            if (searchUsername) {
+              query = query.eq('author', searchUsername);
+            } else if (selectedUsers.length > 0) {
+              query = query.in('author', selectedUsers);
+            }
+
+            query = applyDateFilters(query, dateFilter, endDateFilter, 'created_at');
+
+            return query
               .order('created_at', { ascending: false })
               .abortSignal(signal)
               .returns<Tables['reviews']['Row'][]>();
           })(),
         ]);
+
         console.log('Fetched activities from Supabase:', activities);
         console.log('mosip/gist activities:', activities.filter(a => a.repository === 'mosip/gist'));
         
@@ -208,15 +220,17 @@ export function useGitHubActivity(
           })) ?? []),
           ...(prsRes.data?.map((p) => ({
             type: 'pr' as const,
-            title: p.title,
+            title: p["title"],
             author: p.author,
+            created_at: p.created_at,
             date: p.created_at,
             repository: repoNames[p.repository_id],
           })) ?? []),
           ...(issuesRes.data?.map((i) => ({
             type: 'issue' as const,
-            title: i.title,
+            title: i["title"],
             author: i.author,
+            created_at: i.created_at,
             date: i.created_at,
             repository: repoNames[i.repository_id],
           })) ?? []),
@@ -244,7 +258,7 @@ export function useGitHubActivity(
 
     fetchData();
     return () => controller.abort();
-  }, [selectedRepo, dateRange, startDate, endDate, shouldFetchData]);
+  }, [selectedRepo, dateRange, startDate, endDate, shouldFetchData, searchUsername, selectedRepos, selectedUsers]);
 
   return { activities, loading, error };
 }

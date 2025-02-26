@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
-import { GitCommit, GitPullRequest, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { GitCommit, GitPullRequest, AlertCircle, UserPlus } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { StatsCard } from './components/StatsCard';
-import { ActivityChart } from './components/ActivityChart';
+import ActivityChart from './components/ActivityChart';
 import { ActivityTable } from './components/ActivityTable';
 import { UserActivityStats } from './components/UserActivityStats';
 import { useGitHubActivity } from './lib/hooks';
@@ -14,17 +14,26 @@ function App() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [dateRange, setDateRange] = useState<string>('all');
-  const [shouldFetchData, setShouldFetchData] = useState<boolean>(true);
+  const [shouldFetchData, setShouldFetchData] = useState<boolean>(false);
   const [newRepoInput, setNewRepoInput] = useState('');
   const [addRepoError, setAddRepoError] = useState('');
   const [repositories, setRepositories] = useState<string[]>([]);
-  
+  const [users, setUsers] = useState<string[]>([]);
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [searchUsername, setSearchUsername] = useState<string>('');
+  const [currentUsername, setCurrentUsername] = useState<string>('');
+  const [addUserError, setAddUserError] = useState<string>('');
+
   const { activities, loading, error } = useGitHubActivity(
     selectedRepo,
     dateRange,
     startDate,
     endDate,
-    shouldFetchData
+    shouldFetchData,
+    currentUsername,
+    selectedRepos,
+    selectedUsers
   );
 
   useEffect(() => {
@@ -38,31 +47,38 @@ function App() {
         if (error) {
           console.error("Error fetching repositories:", error);
         } else {
-          setRepositories(data ? data.map(repo => repo.name) : []);
+          // Filter out any null or empty string values from the fetched data
+          const validRepoNames = (data ? data.map(repo => repo.name) : []).filter(name => name);
+          setRepositories(validRepoNames);
         }
       } catch (err) {
         console.error("Unexpected error fetching repositories:", err);
       }
     }
 
+    async function fetchUsers() {
+      try {
+        const { data, error } = await supabase
+          .from('commits')
+          .select('author')
+          .limit(500)
+          .returns<Database['public']['Tables']['commits']['Row'][]>();
+
+        if (error) {
+          console.error("Error fetching users:", error);
+        } else {
+          // Extract unique authors from the commits data
+          const uniqueUsers = [...new Set(data.map(commit => commit.author))];
+          setUsers(uniqueUsers);
+        }
+      } catch (err) {
+        console.error("Unexpected error fetching users:", err);
+      }
+    }
+
     fetchRepositories();
-  }, [shouldFetchData]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-xl text-gray-600">Loading repository data...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-xl text-red-600">{error}</div>
-      </div>
-    );
-  }
+    fetchUsers();
+  }, []);
 
   const handleDateRangeChange = (value: string) => {
     setDateRange(value);
@@ -71,6 +87,8 @@ function App() {
       setEndDate('');
       setShouldFetchData(true);
     } else {
+      setStartDate('');
+      setEndDate('');
       setShouldFetchData(false);
     }
   };
@@ -84,7 +102,7 @@ function App() {
   const handleAddRepo = async () => {
     setAddRepoError('');
     try {
-      const res = await fetch('/api/addRepo', {
+      const res = await fetch('http://localhost:3000/api/addRepo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repoName: newRepoInput }),
@@ -121,17 +139,49 @@ function App() {
     }
   };
 
+  const handleSearchUser = useCallback(() => {
+    setCurrentUsername(searchUsername);
+    setShouldFetchData(true);
+  }, [searchUsername, setCurrentUsername, setShouldFetchData]);
+
+  const handleExpand = useCallback(() => {
+    setShouldFetchData(true);
+  }, [setShouldFetchData]);
+
+  const handleAddUser = () => {
+    if (searchUsername && !users.includes(searchUsername)) {
+      setUsers(prevUsers => [...prevUsers, searchUsername]);
+      setSearchUsername('');
+      setAddUserError('');
+    } else if (users.includes(searchUsername)) {
+      setAddUserError('User already exists.');
+    } else {
+      setAddUserError('Please enter a username.');
+    }
+  };
+
+  const handleDeleteUser = (userToDelete: string) => {
+    setUsers(users.filter(user => user !== userToDelete));
+    setSelectedUsers(selectedUsers.filter(user => user !== userToDelete));
+    setShouldFetchData(true);
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <Sidebar
         repositories={repositories}
-        selectedRepo={selectedRepo}
+        users={users}
+        selectedRepos={selectedRepos}
+        selectedUsers={selectedUsers}
+        onSelectRepos={setSelectedRepos}
+        onSelectUsers={setSelectedUsers}
         onSelectRepo={(repo) => {
           setSelectedRepo(repo);
           setShouldFetchData(true);
         }}
+        onDeleteUser={handleDeleteUser}
       />
-      
+
       <div className="pl-64">
         <header className="bg-white shadow-sm">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -187,6 +237,24 @@ function App() {
           </div>
         </header>
         
+        <div className="p-4 flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="GitHub Username"
+            value={searchUsername}
+            onChange={(e) => setSearchUsername(e.target.value)}
+            className="border border-gray-300 rounded px-3 py-2"
+          />
+          <button
+            onClick={handleAddUser}
+            className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+          >
+            <UserPlus className="w-4 h-4 mr-2" />
+            Add
+          </button>
+          {addUserError && <p className="text-red-500 text-sm mt-1">{addUserError}</p>}
+        </div>
+
         <div className="p-4">
           <input
             type="text"
@@ -216,6 +284,12 @@ function App() {
             <UserActivityStats activities={activities} />
             <ActivityTable activities={activities} />
           </div>
+          <button
+            onClick={handleExpand}
+            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
+          >
+            Expand
+          </button>
         </main>
       </div>
     </div>
